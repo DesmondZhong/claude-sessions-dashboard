@@ -1,0 +1,6 @@
+# Claude Sessions Dashboard — Server Configuration
+api_key: "change-me-to-a-secret"
+host: "0.0.0.0"
+port: 5000
+debug: false
+# db_path: /path/to/sessions.db  # defaults to ./sessions.db
