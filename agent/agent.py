@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import platform
 import sys
 import time
 from datetime import datetime, timezone
@@ -60,6 +61,7 @@ def discover_sessions():
                     continue
 
     sessions = []
+    raw_sessions = {}
     for project_dir in Path(projects_dir).iterdir():
         if not project_dir.is_dir():
             continue
@@ -72,10 +74,12 @@ def discover_sessions():
                 session_data = parse_session_file(jsonl_file, session_id, history_index)
                 if session_data:
                     sessions.append(session_data)
+                    # Read raw file for backup
+                    raw_sessions[session_id] = jsonl_file.read_text()
             except Exception as e:
                 print(f"  Warning: failed to parse {jsonl_file}: {e}", file=sys.stderr)
 
-    return sessions
+    return sessions, raw_sessions
 
 
 def parse_session_file(jsonl_path, session_id, history_index):
@@ -193,11 +197,11 @@ def get_file_mtime(path):
         return ""
 
 
-def sync_to_server(config, sessions):
+def sync_to_server(config, sessions, raw_sessions=None):
     """Push sessions to the dashboard server."""
     server_url = config["server_url"].rstrip("/")
     api_key = config.get("api_key", "")
-    vm_name = config.get("vm_name", os.uname().nodename)
+    vm_name = config.get("vm_name", platform.node())
 
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -207,6 +211,8 @@ def sync_to_server(config, sessions):
         "vm_name": vm_name,
         "sessions": sessions,
     }
+    if raw_sessions:
+        payload["raw_sessions"] = raw_sessions
 
     resp = requests.post(
         f"{server_url}/api/sync",
@@ -224,23 +230,26 @@ def run_once(config):
     synced = state.get("synced_sessions", {})
 
     print(f"Discovering sessions in {CLAUDE_DIR}...")
-    all_sessions = discover_sessions()
+    all_sessions, all_raw = discover_sessions()
     print(f"  Found {len(all_sessions)} sessions")
 
     # Filter to only new/updated sessions
     to_sync = []
+    raw_to_sync = {}
     for sess in all_sessions:
         sid = sess["id"]
         last_ts = sess.get("last_timestamp", "")
         if sid not in synced or synced[sid] != last_ts:
             to_sync.append(sess)
+            if sid in all_raw:
+                raw_to_sync[sid] = all_raw[sid]
 
     if not to_sync:
         print("  All sessions up to date, nothing to sync.")
         return
 
     print(f"  Syncing {len(to_sync)} new/updated sessions...")
-    result = sync_to_server(config, to_sync)
+    result = sync_to_server(config, to_sync, raw_to_sync)
     print(f"  Server accepted {result.get('synced', 0)} sessions")
 
     # Update state

@@ -13,6 +13,8 @@ from flask import Flask, g, jsonify, request, Response
 
 app = Flask(__name__)
 
+BACKUP_DIR = None  # set during init
+
 CONFIG_PATH = os.environ.get(
     "CLAUDE_DASHBOARD_CONFIG",
     os.path.join(os.path.dirname(__file__), "server-config.yaml"),
@@ -42,8 +44,11 @@ def close_db(exc):
 
 
 def init_db():
+    global BACKUP_DIR
     cfg = load_config()
     db_path = cfg.get("db_path", os.path.join(os.path.dirname(__file__), "sessions.db"))
+    BACKUP_DIR = cfg.get("backup_dir", os.path.join(os.path.dirname(__file__), "backups"))
+    os.makedirs(BACKUP_DIR, exist_ok=True)
     db = sqlite3.connect(db_path)
     db.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
@@ -99,7 +104,17 @@ def sync():
 
     vm_name = data.get("vm_name", "unknown")
     sessions = data.get("sessions", [])
+    raw_sessions = data.get("raw_sessions", {})
     db = get_db()
+
+    # Save raw JSONL backups
+    if BACKUP_DIR and raw_sessions:
+        vm_backup_dir = os.path.join(BACKUP_DIR, vm_name)
+        os.makedirs(vm_backup_dir, exist_ok=True)
+        for session_id, raw_lines in raw_sessions.items():
+            backup_path = os.path.join(vm_backup_dir, f"{session_id}.jsonl")
+            with open(backup_path, "w") as f:
+                f.write(raw_lines)
 
     synced = 0
     for sess in sessions:

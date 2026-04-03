@@ -1,17 +1,33 @@
 # Claude Sessions Dashboard
 
-Centrally view and manage Claude Code conversations across multiple VMs.
+Centrally view and manage Claude Code conversations across multiple machines.
 
 ## Architecture
 
-- **Server** (`server/app.py`) — Flask + SQLite dashboard, runs on your central machine
-- **Agent** (`agent/agent.py`) — lightweight sync script, runs on each VM
+```
+  Machine A (agent)     Machine B (agent)     Machine C (agent)
+  ┌──────────┐         ┌──────────┐         ┌──────────┐
+  │ agent.py │──POST──▶│ agent.py │──POST──▶│ agent.py │──POST──┐
+  └──────────┘         └──────────┘         └──────────┘        │
+                                                                 ▼
+                                                    ┌────────────────────┐
+                                                    │  Server (app.py)   │
+                                                    │  Flask + SQLite    │
+                                                    │  + JSONL backups   │
+                                                    └────────────────────┘
+                                                                 │
+                                                        Cloudflare Tunnel
+                                                      + Cloudflare Access
+                                                                 │
+                                                         Browser (anywhere)
+```
 
-Agents periodically push session data to the server. The server stores everything in SQLite and serves a web dashboard.
+- **Server** (`server/app.py`) — Flask + SQLite dashboard. Stores parsed sessions in SQLite and raw JSONL backups on disk.
+- **Agent** (`agent/agent.py`) — lightweight sync script on each machine. Reads local `~/.claude/` session files and pushes to the server.
 
 ## Quick Start
 
-### 1. Server Setup (your Mac Mini)
+### 1. Server Setup
 
 ```bash
 cd server
@@ -20,18 +36,21 @@ pip install -r requirements.txt
 # Edit config — set your API key
 vim server-config.yaml
 
+# Run directly
 python app.py
+
+# Or install as a service (see below)
 ```
 
 Dashboard available at `http://localhost:5000`.
 
-### 2. Agent Setup (each VM)
+### 2. Agent Setup (each machine)
 
 ```bash
 cd agent
 pip install -r requirements.txt
 
-# Edit config — set server URL, API key, and VM name
+# Edit config — set server URL, API key, and machine name
 vim agent-config.yaml
 
 # Sync once
@@ -48,31 +67,98 @@ Sync every 5 minutes:
 ```bash
 crontab -e
 # Add:
-*/5 * * * * cd /path/to/claude-sessions/agent && python agent.py --once >> /tmp/claude-sync.log 2>&1
+*/5 * * * * cd /path/to/claude-sessions/agent && python3 agent.py --once >> /tmp/claude-sync.log 2>&1
 ```
 
-## Exposing with Cloudflare Tunnel
+## Installing as a Service
 
-To access the dashboard from anywhere with authentication:
+The server can be installed as a persistent service that starts on boot.
+
+### Linux (systemd)
 
 ```bash
-# Install cloudflared
-# https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+cd server
+chmod +x install-service.sh
+./install-service.sh
+```
 
-# Login
+Manage with:
+```bash
+sudo systemctl status claude-dashboard
+sudo systemctl stop claude-dashboard
+sudo systemctl restart claude-dashboard
+sudo journalctl -u claude-dashboard -f   # view logs
+```
+
+Uninstall: `./uninstall-service.sh`
+
+### macOS (launchd)
+
+```bash
+cd server
+chmod +x install-service.sh
+./install-service.sh
+```
+
+Manage with:
+```bash
+launchctl list | grep claude-dashboard
+launchctl stop com.claude-dashboard
+launchctl start com.claude-dashboard
+tail -f /tmp/claude-dashboard.log
+```
+
+Uninstall: `./uninstall-service.sh`
+
+### Windows (NSSM or Scheduled Task)
+
+Run PowerShell as Administrator:
+
+```powershell
+cd server
+.\install-service.ps1
+```
+
+If [NSSM](https://nssm.cc/) is installed, it creates a proper Windows service. Otherwise, it falls back to a scheduled task that runs at logon.
+
+## Making the Server Reachable Across Machines
+
+Your agents need to reach the server over the network. Options:
+
+### Option A: Cloudflare Tunnel (recommended for internet access)
+
+Exposes your server securely without opening ports or configuring firewalls.
+
+```bash
+# Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
 cloudflared tunnel login
-
-# Create tunnel
 cloudflared tunnel create claude-dashboard
-
-# Route to your domain
-cloudflared tunnel route dns claude-dashboard claude-sessions.yourdomain.com
-
-# Run tunnel
+cloudflared tunnel route dns claude-dashboard sessions.yourdomain.com
 cloudflared tunnel --url http://localhost:5000 run claude-dashboard
 ```
 
-Then set up **Cloudflare Access** in the Cloudflare Zero Trust dashboard to add authentication (Google, GitHub, email OTP, etc.) in front of your tunnel.
+Then configure **Cloudflare Access** in the Zero Trust dashboard to add authentication (Google, GitHub, email OTP) for browser access. Agents bypass Cloudflare Access by using the API key header directly — add a [Service Auth token](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) or bypass policy for the `/api/sync` path.
+
+### Option B: Tailscale / ZeroTier (private mesh VPN)
+
+If all machines are on Tailscale, the server is reachable via its Tailscale IP (e.g., `http://100.x.y.z:5000`). No public exposure needed.
+
+### Option C: Direct IP / LAN
+
+If machines are on the same network, use the server's LAN IP directly. For machines on different networks, you'll need port forwarding on your router (port 5000).
+
+Set the agent config accordingly:
+
+```yaml
+# agent-config.yaml
+server_url: "https://sessions.yourdomain.com"  # Cloudflare Tunnel
+# server_url: "http://100.64.0.1:5000"         # Tailscale
+# server_url: "http://192.168.1.50:5000"        # LAN
+```
+
+## Raw JSONL Backups
+
+In addition to the SQLite database, the server stores raw JSONL session files in `server/backups/<vm-name>/`. This preserves the original Claude Code session format including all metadata, tool calls, and thinking blocks.
 
 ## Configuration
 
@@ -84,6 +170,7 @@ Then set up **Cloudflare Access** in the Cloudflare Zero Trust dashboard to add 
 | `host` | Bind address | `0.0.0.0` |
 | `port` | Port | `5000` |
 | `db_path` | SQLite database path | `./sessions.db` |
+| `backup_dir` | Raw JSONL backup directory | `./backups` |
 | `debug` | Flask debug mode | `false` |
 
 ### Agent (`agent/agent-config.yaml`)
