@@ -73,6 +73,14 @@ def init_db():
             FOREIGN KEY (session_id) REFERENCES sessions(id)
         )
     """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS agents (
+            vm_name TEXT PRIMARY KEY,
+            ip_address TEXT,
+            last_sync TEXT,
+            session_count INTEGER DEFAULT 0
+        )
+    """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_vm ON sessions(vm_name)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_last_ts ON sessions(last_timestamp DESC)")
@@ -106,6 +114,19 @@ def sync():
     sessions = data.get("sessions", [])
     raw_sessions = data.get("raw_sessions", {})
     db = get_db()
+
+    # Record agent heartbeat
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    db.execute("""
+        INSERT INTO agents (vm_name, ip_address, last_sync, session_count)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(vm_name) DO UPDATE SET
+            ip_address = excluded.ip_address,
+            last_sync = excluded.last_sync,
+            session_count = excluded.session_count
+    """, (vm_name, client_ip, datetime.now(timezone.utc).isoformat(), len(sessions)))
 
     # Save raw JSONL backups
     if BACKUP_DIR and raw_sessions:
@@ -217,6 +238,17 @@ def get_session(session_id):
     })
 
 
+@app.route("/api/agents")
+def list_agents():
+    db = get_db()
+    rows = db.execute("SELECT * FROM agents ORDER BY last_sync DESC").fetchall()
+    total_sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    return jsonify({
+        "agents": [dict(r) for r in rows],
+        "total_sessions": total_sessions,
+    })
+
+
 # --- Dashboard ---
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -313,6 +345,27 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .collapsible-content { display: none; margin-top: 8px; }
   .collapsible.open + .collapsible-content { display: block; }
 
+  /* Agents Panel */
+  .agents-panel { background: var(--surface); border: 1px solid var(--border);
+                   border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+  .agents-header { padding: 10px 16px; cursor: pointer; user-select: none;
+                    display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+  .agents-header:hover { background: rgba(255,255,255,0.03); }
+  .agents-header .arrow { font-size: 10px; transition: transform 0.15s; }
+  .agents-header .arrow.open { transform: rotate(90deg); }
+  .agents-header .badge { background: var(--accent); color: #fff; font-size: 11px;
+                           padding: 1px 8px; border-radius: 10px; font-weight: 600; }
+  .agents-body { display: none; border-top: 1px solid var(--border); }
+  .agents-body.open { display: block; }
+  .agents-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .agents-table th { text-align: left; padding: 8px 16px; color: var(--text-muted);
+                      font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  .agents-table td { padding: 8px 16px; border-top: 1px solid var(--border); }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status-dot.online { background: #3fb950; }
+  .status-dot.stale { background: #d29922; }
+  .status-dot.offline { background: #f85149; }
+
   .empty { text-align: center; padding: 48px; color: var(--text-muted); }
   .loading { text-align: center; padding: 48px; color: var(--text-muted); }
 
@@ -336,6 +389,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 <div class="container">
+  <div class="agents-panel" id="agents-panel">
+    <div class="agents-header" onclick="toggleAgents()">
+      <span class="arrow" id="agents-arrow">&#9654;</span>
+      <span>Connected Agents</span>
+      <span class="badge" id="agents-count">0</span>
+    </div>
+    <div class="agents-body" id="agents-body">
+      <table class="agents-table">
+        <thead><tr><th>Status</th><th>Agent</th><th>IP Address</th><th>Sessions</th><th>Last Sync</th></tr></thead>
+        <tbody id="agents-tbody"></tbody>
+      </table>
+    </div>
+  </div>
   <div class="list-view" id="list-view">
     <div class="list-header">
       <span>VM</span><span>Project</span><span>Summary</span><span>Messages</span><span>Last Active</span>
@@ -351,6 +417,45 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <script>
 let allSessions = [];
 let debounceTimer;
+
+function toggleAgents() {
+  const body = document.getElementById('agents-body');
+  const arrow = document.getElementById('agents-arrow');
+  body.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+
+function agentStatus(lastSync) {
+  if (!lastSync) return 'offline';
+  const diff = Date.now() - new Date(lastSync).getTime();
+  if (diff < 2 * 3600000) return 'online';   // synced within 2h (interval is 1h)
+  if (diff < 6 * 3600000) return 'stale';     // within 6h
+  return 'offline';
+}
+
+async function loadAgents() {
+  try {
+    const res = await fetch('/api/agents');
+    const data = await res.json();
+    document.getElementById('agents-count').textContent = data.agents.length;
+    const tbody = document.getElementById('agents-tbody');
+    if (!data.agents.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">No agents connected yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.agents.map(a => {
+      const st = agentStatus(a.last_sync);
+      const label = st === 'online' ? 'Online' : st === 'stale' ? 'Stale' : 'Offline';
+      return `<tr>
+        <td><span class="status-dot ${st}"></span>${label}</td>
+        <td><strong>${esc(a.vm_name)}</strong></td>
+        <td><code>${esc(a.ip_address || 'unknown')}</code></td>
+        <td>${a.session_count}</td>
+        <td>${formatTime(a.last_sync)}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
 
 async function loadSessions() {
   const el = document.getElementById('session-list');
@@ -471,7 +576,7 @@ function showList() {
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-function refresh() { loadSessions(); }
+function refresh() { loadSessions(); loadAgents(); }
 
 document.getElementById('search').addEventListener('input', () => {
   clearTimeout(debounceTimer);
@@ -481,6 +586,7 @@ document.getElementById('vm-filter').addEventListener('change', loadSessions);
 document.getElementById('project-filter').addEventListener('change', loadSessions);
 
 loadSessions();
+loadAgents();
 </script>
 </body>
 </html>"""

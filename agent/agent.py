@@ -5,7 +5,9 @@ import argparse
 import json
 import os
 import platform
+import signal
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +18,11 @@ import yaml
 DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "agent-config.yaml")
 STATE_DIR = os.path.expanduser("~/.claude-dashboard-agent")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
+PID_FILE = os.path.join(STATE_DIR, "agent.pid")
 CLAUDE_DIR = os.path.expanduser("~/.claude")
+
+# Event used to wake up the daemon for an immediate sync
+_sync_now = threading.Event()
 
 
 def load_config(config_path):
@@ -229,9 +235,9 @@ def run_once(config):
     state = load_state()
     synced = state.get("synced_sessions", {})
 
-    print(f"Discovering sessions in {CLAUDE_DIR}...")
+    print(f"Discovering sessions in {CLAUDE_DIR}...", flush=True)
     all_sessions, all_raw = discover_sessions()
-    print(f"  Found {len(all_sessions)} sessions")
+    print(f"  Found {len(all_sessions)} sessions", flush=True)
 
     # Filter to only new/updated sessions
     to_sync = []
@@ -245,12 +251,12 @@ def run_once(config):
                 raw_to_sync[sid] = all_raw[sid]
 
     if not to_sync:
-        print("  All sessions up to date, nothing to sync.")
+        print("  All sessions up to date, nothing to sync.", flush=True)
         return
 
-    print(f"  Syncing {len(to_sync)} new/updated sessions...")
+    print(f"  Syncing {len(to_sync)} new/updated sessions...", flush=True)
     result = sync_to_server(config, to_sync, raw_to_sync)
-    print(f"  Server accepted {result.get('synced', 0)} sessions")
+    print(f"  Server accepted {result.get('synced', 0)} sessions", flush=True)
 
     # Update state
     for sess in to_sync:
@@ -260,16 +266,71 @@ def run_once(config):
     save_state(state)
 
 
+def write_pid():
+    """Write PID file so --trigger can find the daemon."""
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+
+def remove_pid():
+    try:
+        os.remove(PID_FILE)
+    except OSError:
+        pass
+
+
+def read_pid():
+    """Read the daemon's PID from the PID file."""
+    try:
+        with open(PID_FILE) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def trigger_daemon():
+    """Send SIGUSR1 to the running daemon to trigger an immediate sync."""
+    pid = read_pid()
+    if pid is None:
+        print("No running agent daemon found (no PID file).", file=sys.stderr)
+        sys.exit(1)
+    try:
+        os.kill(pid, signal.SIGUSR1)
+        print(f"Triggered sync on daemon (PID {pid}).")
+    except ProcessLookupError:
+        print(f"Daemon PID {pid} is not running. Stale PID file.", file=sys.stderr)
+        remove_pid()
+        sys.exit(1)
+    except PermissionError:
+        print(f"Permission denied sending signal to PID {pid}.", file=sys.stderr)
+        sys.exit(1)
+
+
 def run_daemon(config):
     """Run continuously, syncing on an interval."""
-    interval = config.get("sync_interval", 300)
-    print(f"Running in daemon mode, syncing every {interval}s")
-    while True:
-        try:
-            run_once(config)
-        except Exception as e:
-            print(f"Sync error: {e}", file=sys.stderr)
-        time.sleep(interval)
+    interval = config.get("sync_interval", 3600)
+    print(f"Running in daemon mode, syncing every {interval}s", flush=True)
+
+    # Set up SIGUSR1 handler to trigger immediate sync
+    if hasattr(signal, "SIGUSR1"):
+        def _handle_trigger(signum, frame):
+            print("Received SIGUSR1 — triggering immediate sync.", flush=True)
+            _sync_now.set()
+        signal.signal(signal.SIGUSR1, _handle_trigger)
+
+    write_pid()
+    try:
+        while True:
+            try:
+                run_once(config)
+            except Exception as e:
+                print(f"Sync error: {e}", file=sys.stderr)
+            # Wait for interval or until signalled
+            _sync_now.wait(timeout=interval)
+            _sync_now.clear()
+    finally:
+        remove_pid()
 
 
 def main():
@@ -277,7 +338,13 @@ def main():
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="Path to config file")
     parser.add_argument("--once", action="store_true", help="Sync once and exit")
     parser.add_argument("--daemon", action="store_true", help="Run continuously")
+    parser.add_argument("--trigger", action="store_true",
+                        help="Signal a running daemon to sync immediately")
     args = parser.parse_args()
+
+    if args.trigger:
+        trigger_daemon()
+        return
 
     config = load_config(args.config)
 

@@ -61,7 +61,15 @@ chmod +x install-service.sh
 ./install-service.sh
 ```
 
-The agent runs in daemon mode as a background service, syncing every 5 minutes (configurable via `sync_interval` in `agent-config.yaml`). It starts automatically on boot.
+The agent runs in daemon mode as a background service, syncing every hour by default (configurable via `sync_interval` in `agent-config.yaml`). It starts automatically on boot.
+
+To trigger an immediate sync without waiting for the next interval:
+
+```bash
+python agent.py --trigger
+```
+
+This sends a signal to the running daemon, which syncs right away and then resumes its normal schedule.
 
 ## Service Management
 
@@ -200,4 +208,20 @@ In addition to the SQLite database, the server stores raw JSONL session files in
 | `server_url` | Dashboard server URL | (required) |
 | `api_key` | Shared secret | (required) |
 | `vm_name` | Label for this machine | hostname |
-| `sync_interval` | Seconds between syncs (daemon mode) | `300` |
+| `sync_interval` | Seconds between syncs (daemon mode) | `3600` |
+
+## Agent Commands
+
+| Command | Description |
+|---------|-------------|
+| `python agent.py --once` | Sync once and exit |
+| `python agent.py --daemon` | Run continuously (used by the service) |
+| `python agent.py --trigger` | Signal running daemon to sync immediately |
+
+## Dashboard Features
+
+The web dashboard includes:
+
+- **Agents panel** — expandable section at the top showing all connected agents with their name, IP address, session count, last sync time, and online/stale/offline status
+- **Session list** — all sessions across all machines, searchable and filterable by VM or project
+- **Session detail** — click any session to view the full conversation with collapsible tool calls
