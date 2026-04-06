@@ -7,19 +7,23 @@ Centrally view and manage Claude Code conversations across multiple machines.
 ```
   Machine A (agent)     Machine B (agent)     Machine C (agent)
   ┌──────────┐         ┌──────────┐         ┌──────────┐
-  │ agent.py │──POST──▶│ agent.py │──POST──▶│ agent.py │──POST──┐
-  └──────────┘         └──────────┘         └──────────┘        │
-                                                                 ▼
-                                                    ┌────────────────────┐
-                                                    │  Server (app.py)   │
-                                                    │  Flask + SQLite    │
-                                                    │  + JSONL backups   │
-                                                    └────────────────────┘
-                                                                 │
-                                                        Cloudflare Tunnel
-                                                      + Cloudflare Access
-                                                                 │
-                                                         Browser (anywhere)
+  │ agent.py │         │ agent.py │         │ agent.py │
+  └────┬─────┘         └────┬─────┘         └────┬─────┘
+       │                    │                    │
+       │    POST /api/sync  │                    │
+       └────────────────────┼────────────────────┘
+                            │
+                            ▼
+               ┌────────────────────┐
+               │  Server (app.py)   │
+               │  Flask + SQLite    │
+               │  + JSONL backups   │
+               └────────────────────┘
+                            │
+                   Cloudflare Tunnel
+                 + Cloudflare Access
+                            │
+                    Browser (anywhere)
 ```
 
 - **Server** (`server/app.py`) — Flask + SQLite dashboard. Stores parsed sessions in SQLite and raw JSONL backups on disk.
