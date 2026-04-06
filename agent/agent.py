@@ -221,6 +221,11 @@ def sync_to_server(config, sessions, raw_sessions=None):
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["X-API-Key"] = api_key
+    cf_client_id = config.get("cf_access_client_id", "")
+    cf_client_secret = config.get("cf_access_client_secret", "")
+    if cf_client_id and cf_client_secret:
+        headers["CF-Access-Client-Id"] = cf_client_id
+        headers["CF-Access-Client-Secret"] = cf_client_secret
 
     payload = {
         "vm_name": vm_name,

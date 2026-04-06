@@ -165,7 +165,31 @@ cloudflared tunnel route dns claude-dashboard sessions.yourdomain.com
 cloudflared tunnel --url http://localhost:5050 run claude-dashboard
 ```
 
-Then configure **Cloudflare Access** in the Zero Trust dashboard to add authentication (Google, GitHub, email OTP) for browser access. Agents bypass Cloudflare Access by using the API key header directly — add a [Service Auth token](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) or bypass policy for the `/api/sync` path.
+Then configure **Cloudflare Access** to protect the dashboard:
+
+1. **Add an Access application** — in [Zero Trust dashboard](https://one.dash.cloudflare.com/) → Access → Applications → Add an application → Self-hosted. Set the domain to your tunnel hostname (e.g. `sessions.yourdomain.com`).
+
+2. **Add an Access policy for browser users** — create a policy with an identity provider (Google, GitHub, email OTP, etc.) so you can log in via the browser.
+
+3. **Create a Service Token for agents** — go to Access → Service Auth → Service Tokens → Create Service Token. Copy the **Client ID** and **Client Secret** (the secret is only shown once).
+
+4. **Add a Service Token policy** — in your Access application, add a second policy:
+   - Action: **Service Auth**
+   - Include: **Service Token** → select the token you created
+   
+   This lets the agent bypass identity login and authenticate with the token headers instead.
+
+5. **Configure the agent** — add the service token credentials to `agent-config.yaml`:
+
+   ```yaml
+   # agent-config.yaml
+   server_url: "https://sessions.yourdomain.com"
+   api_key: "your-shared-secret"
+   cf_access_client_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.access"
+   cf_access_client_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ```
+
+   The agent sends these as `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers on every request.
 
 ### Option B: Tailscale / ZeroTier (private mesh VPN)
 
@@ -209,6 +233,8 @@ In addition to the SQLite database, the server stores raw JSONL session files in
 | `api_key` | Shared secret | (required) |
 | `vm_name` | Label for this machine | hostname |
 | `sync_interval` | Seconds between syncs (daemon mode) | `3600` |
+| `cf_access_client_id` | Cloudflare Access service token Client ID | (optional) |
+| `cf_access_client_secret` | Cloudflare Access service token Client Secret | (optional) |
 
 ## Agent Commands
 
