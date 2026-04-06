@@ -338,15 +338,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .container { max-width: 1400px; margin: 0 auto; padding: 16px 24px; }
 
   /* Session List */
-  .session-list { display: flex; flex-direction: column; gap: 2px; }
+  .session-list { display: flex; flex-direction: column; gap: 12px; }
+  .vm-group { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .vm-group-header { padding: 10px 16px; cursor: pointer; user-select: none;
+                      display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+  .vm-group-header:hover { background: var(--hover-overlay); }
+  .vm-group-header .arrow { font-size: 10px; transition: transform 0.15s; }
+  .vm-group-header .arrow.open { transform: rotate(90deg); }
+  .vm-group-header .vm-name { color: var(--accent); font-weight: 600; }
+  .vm-group-header .vm-count { color: var(--text-muted); font-size: 12px; }
+  .vm-group-body { display: none; border-top: 1px solid var(--border); }
+  .vm-group-body.open { display: block; }
   .session-row {
-    display: grid; grid-template-columns: 120px 200px 1fr 80px 160px;
-    gap: 12px; padding: 10px 16px; background: var(--surface);
-    border-radius: 6px; cursor: pointer; align-items: center;
-    border: 1px solid transparent; transition: border-color 0.15s;
+    display: grid; grid-template-columns: 200px 1fr 80px 160px;
+    gap: 12px; padding: 10px 16px;
+    cursor: pointer; align-items: center;
+    border-bottom: 1px solid var(--border); transition: background 0.1s;
   }
-  .session-row:hover { border-color: var(--border); }
-  .session-row .vm { color: var(--accent); font-weight: 500; font-size: 13px; }
+  .session-row:last-child { border-bottom: none; }
+  .session-row:hover { background: var(--hover-overlay); }
   .session-row .project { color: var(--text-muted); font-size: 13px;
                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .session-row .summary { font-size: 14px; overflow: hidden;
@@ -354,7 +364,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .session-row .count { color: var(--text-muted); font-size: 13px; text-align: center; }
   .session-row .time { color: var(--text-muted); font-size: 13px; text-align: right; }
 
-  .list-header { display: grid; grid-template-columns: 120px 200px 1fr 80px 160px;
+  .list-header { display: grid; grid-template-columns: 200px 1fr 80px 160px;
                   gap: 12px; padding: 8px 16px; font-size: 12px;
                   color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
@@ -471,7 +481,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
   <div class="list-view" id="list-view">
     <div class="list-header">
-      <span>VM</span><span>Project</span><span>Summary</span><span>Messages</span><span>Last Active</span>
+      <span>Project</span><span>Summary</span><span>Messages</span><span>Last Active</span>
     </div>
     <div class="session-list" id="session-list"></div>
   </div>
@@ -566,17 +576,63 @@ function renderFilters(filters) {
     }).join('');
 }
 
+let vmGroupState = {};  // track open/closed state across refreshes
+
 function renderList(sessions) {
   const el = document.getElementById('session-list');
   if (!sessions.length) { el.innerHTML = '<div class="empty">No sessions found</div>'; return; }
-  el.innerHTML = sessions.map(s => `
-    <div class="session-row" onclick="showDetail('${esc(s.id)}')">
-      <span class="vm">${esc(s.vm_name)}</span>
-      <span class="project" title="${esc(s.project)}">${esc(shortProject(s.project))}</span>
-      <span class="summary">${s.custom_title ? '<strong>' + esc(s.custom_title) + '</strong> — ' : ''}${esc(s.summary || '(no summary)')}</span>
-      <span class="count">${s.message_count} msgs</span>
-      <span class="time">${formatTime(s.last_timestamp)}</span>
-    </div>`).join('');
+
+  // Group by vm_name, preserving sort order within each group
+  const groups = {};
+  const groupOrder = [];
+  sessions.forEach(s => {
+    if (!groups[s.vm_name]) {
+      groups[s.vm_name] = [];
+      groupOrder.push(s.vm_name);
+    }
+    groups[s.vm_name].push(s);
+  });
+
+  // Sort groups by most recent session
+  groupOrder.sort((a, b) => {
+    const aTime = groups[a][0]?.last_timestamp || '';
+    const bTime = groups[b][0]?.last_timestamp || '';
+    return bTime.localeCompare(aTime);
+  });
+
+  // Default: first group open, rest closed (unless user has toggled)
+  if (Object.keys(vmGroupState).length === 0) {
+    groupOrder.forEach((vm, i) => { vmGroupState[vm] = i === 0; });
+  }
+
+  el.innerHTML = groupOrder.map(vm => {
+    const list = groups[vm];
+    const isOpen = vmGroupState[vm] ?? false;
+    return `<div class="vm-group">
+      <div class="vm-group-header" onclick="toggleVmGroup('${esc(vm)}')">
+        <span class="arrow ${isOpen ? 'open' : ''}" id="vm-arrow-${esc(vm)}">&#9654;</span>
+        <span class="vm-name">${esc(vm)}</span>
+        <span class="vm-count">${list.length} sessions</span>
+      </div>
+      <div class="vm-group-body ${isOpen ? 'open' : ''}" id="vm-body-${esc(vm)}">
+        ${list.map(s => `
+          <div class="session-row" onclick="showDetail('${esc(s.id)}')">
+            <span class="project" title="${esc(s.project)}">${esc(shortProject(s.project))}</span>
+            <span class="summary">${s.custom_title ? '<strong>' + esc(s.custom_title) + '</strong> — ' : ''}${esc(s.summary || '(no summary)')}</span>
+            <span class="count">${s.message_count} msgs</span>
+            <span class="time">${formatTime(s.last_timestamp)}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleVmGroup(vm) {
+  vmGroupState[vm] = !vmGroupState[vm];
+  const body = document.getElementById('vm-body-' + vm);
+  const arrow = document.getElementById('vm-arrow-' + vm);
+  if (body) body.classList.toggle('open');
+  if (arrow) arrow.classList.toggle('open');
 }
 
 function shortProject(p) {
