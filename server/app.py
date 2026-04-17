@@ -315,6 +315,65 @@ def list_clients():
     })
 
 
+@app.route("/api/admin/rename-client", methods=["POST"])
+def rename_client():
+    """Merge one or more vm_names into a canonical name.
+
+    Body: {"from": "OldName" | ["Old1", "Old2"], "to": "NewName"}
+    Updates sessions.vm_name and removes the old client heartbeat rows.
+    """
+    if not check_api_key():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json() or {}
+    src = data.get("from")
+    dst = data.get("to", "").strip()
+
+    if not src or not dst:
+        return jsonify({"error": "'from' and 'to' are required"}), 400
+
+    src_list = [src] if isinstance(src, str) else list(src)
+    src_list = [s for s in src_list if s and s != dst]
+    if not src_list:
+        return jsonify({"error": "no valid source names (can't rename to itself)"}), 400
+
+    db = get_db()
+    placeholders = ",".join("?" * len(src_list))
+    updated = db.execute(
+        f"UPDATE sessions SET vm_name = ? WHERE vm_name IN ({placeholders})",
+        [dst] + src_list,
+    ).rowcount
+    deleted = db.execute(
+        f"DELETE FROM clients WHERE vm_name IN ({placeholders})",
+        src_list,
+    ).rowcount
+    db.commit()
+
+    return jsonify({
+        "from": src_list,
+        "to": dst,
+        "sessions_updated": updated,
+        "clients_removed": deleted,
+    })
+
+
+@app.route("/api/admin/delete-client", methods=["POST"])
+def delete_client():
+    """Delete a client heartbeat row (does not delete sessions)."""
+    if not check_api_key():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json() or {}
+    vm_name = data.get("vm_name", "").strip()
+    if not vm_name:
+        return jsonify({"error": "'vm_name' is required"}), 400
+
+    db = get_db()
+    deleted = db.execute("DELETE FROM clients WHERE vm_name = ?", (vm_name,)).rowcount
+    db.commit()
+    return jsonify({"deleted": deleted})
+
+
 # --- Dashboard ---
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -483,6 +542,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .clients-table th { text-align: left; padding: 8px 16px; color: var(--text-muted);
                       font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
   .clients-table td { padding: 8px 16px; border-top: 1px solid var(--border); }
+  .client-actions { text-align: right; white-space: nowrap; }
+  .client-action { font-size: 12px; padding: 3px 8px; margin-left: 4px;
+                    background: var(--bg); border: 1px solid var(--border);
+                    color: var(--text-muted); border-radius: 4px; cursor: pointer; }
+  .client-action:hover { color: var(--accent); border-color: var(--accent); }
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
   .status-dot.online { background: #3fb950; }
   .status-dot.stale { background: #d29922; }
@@ -522,7 +586,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="clients-body" id="clients-body">
       <table class="clients-table">
-        <thead><tr><th>Status</th><th>Client</th><th>IP Address</th><th>Sessions</th><th>Last Sync</th></tr></thead>
+        <thead><tr><th>Status</th><th>Client</th><th>IP Address</th><th>Sessions</th><th>Last Sync</th><th></th></tr></thead>
         <tbody id="clients-tbody"></tbody>
       </table>
     </div>
@@ -573,21 +637,75 @@ async function loadClients() {
     document.getElementById('clients-count').textContent = data.clients.length;
     const tbody = document.getElementById('clients-tbody');
     if (!data.clients.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">No clients connected yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:16px">No clients connected yet</td></tr>';
       return;
     }
     tbody.innerHTML = data.clients.map(a => {
       const st = clientStatus(a.last_sync);
       const label = st === 'online' ? 'Online' : st === 'stale' ? 'Stale' : 'Offline';
+      const vmEsc = esc(a.vm_name);
       return `<tr>
         <td><span class="status-dot ${st}"></span>${label}</td>
-        <td><strong>${esc(a.vm_name)}</strong></td>
+        <td><strong>${vmEsc}</strong></td>
         <td><code>${esc(a.ip_address || 'unknown')}</code></td>
         <td>${a.session_count}</td>
         <td>${formatTime(a.last_sync)}</td>
+        <td class="client-actions">
+          <button class="client-action" onclick="renameClient('${vmEsc}')" title="Merge this client's sessions into another name">Rename</button>
+          <button class="client-action" onclick="deleteClient('${vmEsc}')" title="Remove this client entry (sessions are kept)">Delete</button>
+        </td>
       </tr>`;
     }).join('');
   } catch (e) { /* ignore */ }
+}
+
+function getAdminApiKey() {
+  let key = sessionStorage.getItem('admin_api_key');
+  if (!key) {
+    key = prompt('Enter server API key (for admin actions):');
+    if (key) sessionStorage.setItem('admin_api_key', key);
+  }
+  return key;
+}
+
+async function renameClient(fromName) {
+  const toName = prompt(`Merge "${fromName}" into which client name?`);
+  if (!toName || toName === fromName) return;
+  const key = getAdminApiKey();
+  if (!key) return;
+  const res = await fetch('/api/admin/rename-client', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-API-Key': key},
+    body: JSON.stringify({from: fromName, to: toName}),
+  });
+  if (res.status === 401) {
+    sessionStorage.removeItem('admin_api_key');
+    alert('Invalid API key.');
+    return;
+  }
+  const data = await res.json();
+  if (!res.ok) { alert('Error: ' + (data.error || res.status)); return; }
+  alert(`Merged: ${data.sessions_updated} sessions updated, ${data.clients_removed} client row(s) removed.`);
+  refresh();
+}
+
+async function deleteClient(vmName) {
+  if (!confirm(`Remove client entry "${vmName}"? Sessions are kept.`)) return;
+  const key = getAdminApiKey();
+  if (!key) return;
+  const res = await fetch('/api/admin/delete-client', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-API-Key': key},
+    body: JSON.stringify({vm_name: vmName}),
+  });
+  if (res.status === 401) {
+    sessionStorage.removeItem('admin_api_key');
+    alert('Invalid API key.');
+    return;
+  }
+  const data = await res.json();
+  if (!res.ok) { alert('Error: ' + (data.error || res.status)); return; }
+  refresh();
 }
 
 async function loadSessions() {
