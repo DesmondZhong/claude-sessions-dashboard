@@ -357,6 +357,26 @@ def rename_client():
     })
 
 
+@app.route("/api/admin/move-session", methods=["POST"])
+def move_session():
+    """Change a single session's vm_name (move it to another group)."""
+    if not check_api_key():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json() or {}
+    session_id = data.get("session_id", "").strip()
+    vm_name = data.get("vm_name", "").strip()
+    if not session_id or not vm_name:
+        return jsonify({"error": "'session_id' and 'vm_name' are required"}), 400
+
+    db = get_db()
+    updated = db.execute(
+        "UPDATE sessions SET vm_name = ? WHERE id = ?", (vm_name, session_id),
+    ).rowcount
+    db.commit()
+    return jsonify({"updated": updated, "vm_name": vm_name})
+
+
 @app.route("/api/admin/delete-client", methods=["POST"])
 def delete_client():
     """Delete a client heartbeat row (does not delete sessions)."""
@@ -462,6 +482,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                            text-overflow: ellipsis; white-space: nowrap; }
   .session-row .count { color: var(--text-muted); font-size: 13px; text-align: center; }
   .session-row .time { color: var(--text-muted); font-size: 13px; text-align: right; }
+  .session-row { position: relative; }
+  .session-row .move-btn { position: absolute; right: 8px; top: 8px;
+                            opacity: 0; font-size: 11px; padding: 2px 8px;
+                            background: var(--surface); border: 1px solid var(--border);
+                            color: var(--text-muted); border-radius: 4px; cursor: pointer;
+                            transition: opacity 0.15s; }
+  .session-row:hover .move-btn { opacity: 1; }
+  .session-row .move-btn:hover { color: var(--accent); border-color: var(--accent); }
   .session-row .snippet { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted);
                            padding-top: 6px; border-top: 1px dashed var(--border); margin-top: 4px;
                            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -689,6 +717,28 @@ async function renameClient(fromName) {
   refresh();
 }
 
+async function moveSession(sessionId, currentVm) {
+  const suggestions = knownVms.filter(v => v !== currentVm).join(', ');
+  const prompt_msg = `Move this session to which group?${suggestions ? '\\n\\nExisting groups: ' + suggestions : ''}`;
+  const newVm = prompt(prompt_msg, '');
+  if (!newVm || newVm === currentVm) return;
+  const key = getAdminApiKey();
+  if (!key) return;
+  const res = await fetch('/api/admin/move-session', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-API-Key': key},
+    body: JSON.stringify({session_id: sessionId, vm_name: newVm}),
+  });
+  if (res.status === 401) {
+    sessionStorage.removeItem('admin_api_key');
+    alert('Invalid API key.');
+    return;
+  }
+  const data = await res.json();
+  if (!res.ok) { alert('Error: ' + (data.error || res.status)); return; }
+  refresh();
+}
+
 async function deleteClient(vmName) {
   if (!confirm(`Remove client entry "${vmName}"? Sessions are kept.`)) return;
   const key = getAdminApiKey();
@@ -730,6 +780,7 @@ async function loadSessions() {
 }
 
 function renderFilters(filters) {
+  knownVms = filters.vms || [];
   const vmSel = document.getElementById('vm-filter');
   const projSel = document.getElementById('project-filter');
   const curVm = vmSel.value, curProj = projSel.value;
@@ -743,6 +794,7 @@ function renderFilters(filters) {
 }
 
 let vmGroupState = {};  // track open/closed state across refreshes
+let knownVms = [];      // populated from filters for the move-to prompt
 
 function renderList(sessions) {
   const el = document.getElementById('session-list');
@@ -794,6 +846,7 @@ function renderList(sessions) {
             <span class="summary">${s.custom_title ? '<strong>' + esc(s.custom_title) + '</strong> — ' : ''}${esc(s.summary || '(no summary)')}</span>
             <span class="count">${s.message_count} msgs</span>
             <span class="time">${formatTime(s.last_timestamp)}</span>
+            <button class="move-btn" onclick="event.stopPropagation(); moveSession('${esc(s.id)}', '${esc(s.vm_name)}')" title="Move to another group">Move</button>
             ${s.match_snippet ? `<span class="snippet">${highlightMatch(s.match_snippet, activeSearch)}</span>` : ''}
           </div>`).join('')}
       </div>
