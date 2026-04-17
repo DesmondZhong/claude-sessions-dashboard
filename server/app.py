@@ -490,6 +490,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             transition: opacity 0.15s; }
   .session-row:hover .move-btn { opacity: 1; }
   .session-row .move-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+                    display: none; align-items: center; justify-content: center; z-index: 200; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border);
+           border-radius: 8px; padding: 20px; min-width: 360px; max-width: 90vw; }
+  .modal h3 { font-size: 16px; margin-bottom: 12px; }
+  .modal label { display: block; font-size: 13px; color: var(--text-muted);
+                  margin-bottom: 4px; }
+  .modal select, .modal input[type="text"] { width: 100%; margin-bottom: 12px; }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal .actions button { padding: 6px 14px; }
   .session-row .snippet { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted);
                            padding-top: 6px; border-top: 1px dashed var(--border); margin-top: 4px;
                            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -639,6 +652,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </nav>
   </div>
 </div>
+
+<!-- Move Session Modal -->
+<div class="modal-overlay" id="move-modal" onclick="if (event.target === this) closeMoveModal()">
+  <div class="modal">
+    <h3>Move session to group</h3>
+    <label for="move-select">Target group</label>
+    <select id="move-select"></select>
+    <div id="move-new-wrap" style="display:none">
+      <label for="move-new-input">New group name</label>
+      <input type="text" id="move-new-input" placeholder="e.g. work-laptop">
+    </div>
+    <div class="actions">
+      <button onclick="closeMoveModal()">Cancel</button>
+      <button class="btn-primary" onclick="confirmMove()">Move</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let allSessions = [];
 let debounceTimer;
@@ -717,25 +748,61 @@ async function renameClient(fromName) {
   refresh();
 }
 
-async function moveSession(sessionId, currentVm) {
-  const suggestions = knownVms.filter(v => v !== currentVm).join(', ');
-  const prompt_msg = `Move this session to which group?${suggestions ? '\\n\\nExisting groups: ' + suggestions : ''}`;
-  const newVm = prompt(prompt_msg, '');
-  if (!newVm || newVm === currentVm) return;
+let pendingMove = null;  // {sessionId, currentVm}
+
+function moveSession(sessionId, currentVm) {
+  pendingMove = { sessionId, currentVm };
+  const select = document.getElementById('move-select');
+  const options = knownVms
+    .filter(v => v !== currentVm)
+    .map(v => `<option value="${esc(v)}">${esc(v)}</option>`)
+    .join('');
+  select.innerHTML = options + '<option value="__new__">+ New group…</option>';
+  document.getElementById('move-new-wrap').style.display = 'none';
+  document.getElementById('move-new-input').value = '';
+  select.onchange = () => {
+    document.getElementById('move-new-wrap').style.display =
+      select.value === '__new__' ? 'block' : 'none';
+    if (select.value === '__new__') document.getElementById('move-new-input').focus();
+  };
+  // If there are no existing target groups, default to new-group input
+  if (knownVms.filter(v => v !== currentVm).length === 0) {
+    select.value = '__new__';
+    select.onchange();
+  }
+  document.getElementById('move-modal').classList.add('open');
+}
+
+function closeMoveModal() {
+  document.getElementById('move-modal').classList.remove('open');
+  pendingMove = null;
+}
+
+async function confirmMove() {
+  if (!pendingMove) return;
+  const select = document.getElementById('move-select');
+  let newVm = select.value;
+  if (newVm === '__new__') {
+    newVm = document.getElementById('move-new-input').value.trim();
+    if (!newVm) { alert('Please enter a group name.'); return; }
+  }
+  if (!newVm || newVm === pendingMove.currentVm) { closeMoveModal(); return; }
   const key = getAdminApiKey();
-  if (!key) return;
+  if (!key) { closeMoveModal(); return; }
   const res = await fetch('/api/admin/move-session', {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-API-Key': key},
-    body: JSON.stringify({session_id: sessionId, vm_name: newVm}),
+    body: JSON.stringify({session_id: pendingMove.sessionId, vm_name: newVm}),
   });
   if (res.status === 401) {
     sessionStorage.removeItem('admin_api_key');
     alert('Invalid API key.');
+    closeMoveModal();
     return;
   }
   const data = await res.json();
-  if (!res.ok) { alert('Error: ' + (data.error || res.status)); return; }
+  if (!res.ok) { alert('Error: ' + (data.error || res.status)); closeMoveModal(); return; }
+  closeMoveModal();
   refresh();
 }
 
