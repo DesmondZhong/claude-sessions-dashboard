@@ -398,11 +398,20 @@ def main():
     parser.add_argument("--daemon", action="store_true", help="Run continuously")
     parser.add_argument("--trigger", action="store_true",
                         help="Signal a running daemon to sync immediately")
+    parser.add_argument("--resync", action="store_true",
+                        help="Clear incremental sync state and push all sessions again")
     args = parser.parse_args()
 
     if args.trigger:
         trigger_daemon()
         return
+
+    if args.resync:
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE)
+            print(f"Cleared sync state at {STATE_FILE}")
+        else:
+            print("No sync state to clear.")
 
     config = load_config(args.config)
 

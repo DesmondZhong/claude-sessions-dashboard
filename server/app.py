@@ -178,6 +178,8 @@ def sync():
             INSERT INTO sessions (id, vm_name, project, custom_title, summary, message_count, first_timestamp, last_timestamp, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                vm_name = excluded.vm_name,
+                project = excluded.project,
                 message_count = excluded.message_count,
                 last_timestamp = excluded.last_timestamp,
                 custom_title = excluded.custom_title,
