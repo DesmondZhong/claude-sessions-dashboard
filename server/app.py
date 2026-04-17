@@ -228,20 +228,47 @@ def list_sessions():
         query += " AND project LIKE ?"
         params.append(f"%{project}%")
     if search:
-        query += " AND (summary LIKE ? OR project LIKE ? OR custom_title LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        like = f"%{search}%"
+        query += """ AND (
+            summary LIKE ? OR project LIKE ? OR custom_title LIKE ?
+            OR id IN (SELECT DISTINCT session_id FROM messages WHERE content LIKE ?)
+        )"""
+        params.extend([like, like, like, like])
 
     query += " ORDER BY last_timestamp DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
 
     rows = db.execute(query, params).fetchall()
 
+    # Build session list with optional content match snippets
+    sessions_out = []
+    for r in rows:
+        sess = dict(r)
+        if search:
+            snippet_row = db.execute(
+                "SELECT content FROM messages WHERE session_id = ? AND content LIKE ? LIMIT 1",
+                (sess["id"], f"%{search}%"),
+            ).fetchone()
+            if snippet_row:
+                content = snippet_row[0] or ""
+                idx = content.lower().find(search.lower())
+                if idx >= 0:
+                    start = max(0, idx - 40)
+                    end = min(len(content), idx + len(search) + 80)
+                    snippet = content[start:end].replace("\n", " ")
+                    if start > 0:
+                        snippet = "…" + snippet
+                    if end < len(content):
+                        snippet = snippet + "…"
+                    sess["match_snippet"] = snippet
+        sessions_out.append(sess)
+
     # Get distinct VM names and projects for filters
     vms = [r[0] for r in db.execute("SELECT DISTINCT vm_name FROM sessions ORDER BY vm_name").fetchall()]
     projects = [r[0] for r in db.execute("SELECT DISTINCT project FROM sessions ORDER BY project").fetchall()]
 
     return jsonify({
-        "sessions": [dict(r) for r in rows],
+        "sessions": sessions_out,
         "filters": {"vms": vms, "projects": projects},
     })
 
@@ -363,6 +390,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                            text-overflow: ellipsis; white-space: nowrap; }
   .session-row .count { color: var(--text-muted); font-size: 13px; text-align: center; }
   .session-row .time { color: var(--text-muted); font-size: 13px; text-align: right; }
+  .session-row .snippet { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted);
+                           padding-top: 6px; border-top: 1px dashed var(--border); margin-top: 4px;
+                           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-row .snippet mark { background: rgba(255,215,0,0.35); color: inherit;
+                                padding: 1px 2px; border-radius: 2px; }
+  .message mark { background: rgba(255,215,0,0.35); color: inherit;
+                   padding: 1px 2px; border-radius: 2px; }
+  .message.search-hit { box-shadow: 0 0 0 2px var(--accent); }
 
   .list-header { display: grid; grid-template-columns: 200px 1fr 80px 160px;
                   gap: 12px; padding: 8px 16px; font-size: 12px;
@@ -605,6 +640,13 @@ function renderList(sessions) {
     groupOrder.forEach((vm, i) => { vmGroupState[vm] = i === 0; });
   }
 
+  const activeSearch = document.getElementById('search').value.trim();
+
+  // Expand all groups when a search is active so results are visible
+  if (activeSearch) {
+    groupOrder.forEach(vm => { vmGroupState[vm] = true; });
+  }
+
   el.innerHTML = groupOrder.map(vm => {
     const list = groups[vm];
     const isOpen = vmGroupState[vm] ?? false;
@@ -616,15 +658,24 @@ function renderList(sessions) {
       </div>
       <div class="vm-group-body ${isOpen ? 'open' : ''}" id="vm-body-${esc(vm)}">
         ${list.map(s => `
-          <div class="session-row" onclick="showDetail('${esc(s.id)}')">
+          <div class="session-row" onclick="showDetail('${esc(s.id)}', ${activeSearch ? `'${esc(activeSearch)}'` : 'null'})">
             <span class="project" title="${esc(s.project)}">${esc(shortProject(s.project))}</span>
             <span class="summary">${s.custom_title ? '<strong>' + esc(s.custom_title) + '</strong> — ' : ''}${esc(s.summary || '(no summary)')}</span>
             <span class="count">${s.message_count} msgs</span>
             <span class="time">${formatTime(s.last_timestamp)}</span>
+            ${s.match_snippet ? `<span class="snippet">${highlightMatch(s.match_snippet, activeSearch)}</span>` : ''}
           </div>`).join('')}
       </div>
     </div>`;
   }).join('');
+}
+
+function highlightMatch(text, term) {
+  if (!text || !term) return esc(text || '');
+  const escaped = esc(text);
+  const termEsc = esc(term).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+  const re = new RegExp('(' + termEsc + ')', 'gi');
+  return escaped.replace(re, '<mark>$1</mark>');
 }
 
 function toggleVmGroup(vm) {
@@ -653,7 +704,7 @@ function formatTime(ts) {
   } catch { return ts; }
 }
 
-async function showDetail(id) {
+async function showDetail(id, searchTerm) {
   document.getElementById('list-view').classList.add('hidden');
   const dv = document.getElementById('detail-view');
   dv.classList.add('active');
@@ -673,21 +724,27 @@ async function showDetail(id) {
     </div>`;
 
   const msgs = data.messages;
+  const termLower = (searchTerm || '').toLowerCase();
   let userMsgIndex = 0;
+  let firstHitId = null;
   document.getElementById('messages').innerHTML = msgs.map((m, i) => {
     const role = m.role || m.message_type || 'system';
     const cls = ['user','assistant','system','tool'].includes(role) ? role : 'system';
-    const msgId = role === 'user' ? `id="user-msg-${userMsgIndex++}"` : '';
+    const isHit = termLower && (m.content || '').toLowerCase().includes(termLower);
+    const domId = role === 'user' ? `user-msg-${userMsgIndex++}` : (isHit ? `hit-msg-${i}` : '');
+    if (isHit && !firstHitId) firstHitId = domId || `hit-msg-${i}`;
+    const idAttr = domId ? `id="${domId}"` : '';
+    const hitClass = isHit ? ' search-hit' : '';
     if (m.message_type === 'tool_call' || m.message_type === 'tool_result') {
-      return `<div class="message tool">
+      return `<div ${idAttr} class="message tool${hitClass}">
         <div class="role collapsible" onclick="this.classList.toggle('open')">${esc(m.message_type)}</div>
-        <div class="collapsible-content"><div class="content"><pre><code>${esc(m.content)}</code></pre></div></div>
+        <div class="collapsible-content"><div class="content"><pre><code>${searchTerm ? highlightMatch(m.content, searchTerm) : esc(m.content)}</code></pre></div></div>
         ${m.timestamp ? `<div class="timestamp">${formatTime(m.timestamp)}</div>` : ''}
       </div>`;
     }
-    return `<div ${msgId} class="message ${cls}">
+    return `<div ${idAttr} class="message ${cls}${hitClass}">
       <div class="role">${esc(role)}</div>
-      <div class="content">${renderContent(m.content)}</div>
+      <div class="content">${searchTerm ? highlightMatch(m.content || '', searchTerm) : renderContent(m.content)}</div>
       ${m.timestamp ? `<div class="timestamp">${formatTime(m.timestamp)}</div>` : ''}
     </div>`;
   }).join('');
@@ -703,6 +760,14 @@ async function showDetail(id) {
 
   // Set up intersection observer for active state
   setupNavObserver();
+
+  // Scroll to first search hit if any
+  if (firstHitId) {
+    requestAnimationFrame(() => {
+      const target = document.getElementById(firstHitId);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
 }
 
 function renderContent(text) {
