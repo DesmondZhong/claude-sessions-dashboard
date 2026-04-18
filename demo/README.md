@@ -1,0 +1,59 @@
+# Demo
+
+Synthetic dataset and deployment config for a public demo of the dashboard.
+
+## What's in here
+
+- `conversations.py` — 12 synthetic sessions across 3 VMs (`macbook-pro`, `dev-server`, `sandbox`). Covers diverse Claude Code scenarios: tool use (Read/Edit/Bash/Grep/WebSearch/WebFetch), subagent delegation, short Q&A, one long multi-step build (~20 user messages) to showcase the navigation sidebar, and one session with a custom title.
+- `seed_demo.py` — wipes and re-creates `demo-sessions.db` from the conversation data.
+- `server-config.yaml` — minimal demo config (secrets come from env vars).
+- `Dockerfile` — containerizes the server and runs the seed on every startup.
+- `render.yaml` — one-click deploy blueprint for [Render](https://render.com).
+
+## Run locally
+
+From the repo root:
+
+```bash
+python demo/seed_demo.py
+CLAUDE_DASHBOARD_CONFIG=$(pwd)/demo/server-config.yaml \
+CLAUDE_DASHBOARD_DB_PATH=$(pwd)/demo/demo-sessions.db \
+CLAUDE_DASHBOARD_PORT=5099 \
+python server/app.py
+```
+
+Open <http://localhost:5099>.
+
+## Deploy to Render
+
+1. Push the repo to GitHub (you've already done this).
+2. In Render: **New +** → **Blueprint** → select your repo.
+3. Render detects `demo/render.yaml` and proposes the service.
+4. In the **Environment** section of the service, set:
+   - `CLAUDE_DASHBOARD_API_KEY` — pick any random string. This protects the admin endpoints (Rename / Move / Delete). Without this set, visitors could modify the demo data.
+   
+   Generate one:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+5. Click **Create Blueprint**. Render builds the Docker image, seeds the DB, and starts the server. Takes ~3 minutes first time.
+6. Your demo is live at `https://claude-sessions-demo.onrender.com` (or whatever name you chose).
+
+**Note**: Render's free tier spins the container down after 15 minutes of inactivity. The first request after idle will take ~30s to cold-start, after which the DB re-seeds and everything is fresh.
+
+## Data freshness
+
+The DB re-seeds on every container restart, so:
+- Visitors can click around freely — their Rename/Move/Delete attempts fail without the API key.
+- If you do log in with the admin key and change things, the changes persist until the next restart.
+- To force a refresh, trigger a redeploy in Render.
+
+## Editing the demo content
+
+Edit `conversations.py`. The format is a list of `SESSIONS`, each a dict with
+`id`, `vm_name`, `project`, `custom_title`, `summary`, and `messages`. Helper
+functions `user()`, `assistant()`, `tool_call()`, `tool_result()`, `system()`
+keep the content readable.
+
+Re-run `python demo/seed_demo.py` to regenerate the DB, or redeploy to apply
+changes live.

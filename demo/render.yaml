@@ -1,0 +1,23 @@
+# Render blueprint — deploy the demo with one click.
+# https://render.com/docs/blueprint-spec
+#
+# Usage:
+#   1. Push this repo to GitHub.
+#   2. In Render: New + → Blueprint → select this repo.
+#   3. Render reads this file, creates the service, prompts for env vars.
+#   4. Set CLAUDE_DASHBOARD_API_KEY in the Render dashboard (keeps admin
+#      actions protected — without it, anyone could rename/move/delete).
+
+services:
+  - type: web
+    name: claude-sessions-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./demo/Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: CLAUDE_DASHBOARD_API_KEY
+        sync: false   # must be set manually in the Render dashboard
+      - key: PORT
+        value: 5050

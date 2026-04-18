@@ -2,6 +2,8 @@
 
 Centrally view and manage Claude Code conversations across multiple machines.
 
+See [`demo/`](./demo/) for a live showcase with synthetic data, including a one-click Render deploy.
+
 ## Architecture
 
 ```

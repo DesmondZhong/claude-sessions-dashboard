@@ -1,0 +1,6 @@
+# Demo server config. The api_key should be set via the
+# CLAUDE_DASHBOARD_API_KEY environment variable (not committed here).
+# Admin endpoints (rename/move/delete) require a matching key.
+host: "0.0.0.0"
+port: 5050
+# db_path and api_key come from env vars — see .env.example at repo root.
