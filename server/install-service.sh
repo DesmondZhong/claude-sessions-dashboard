@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install claude-sessions-dashboard as a system service (Linux systemd or macOS launchd)
+# Install Claude Code Sessions Dashboard server as a system service (Linux systemd or macOS launchd)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -34,7 +34,7 @@ case "$(uname -s)" in
         SERVICE_FILE="/etc/systemd/system/claude-dashboard.service"
         sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
-Description=Claude Sessions Dashboard
+Description=Claude Code Sessions Dashboard
 After=network.target
 
 [Service]

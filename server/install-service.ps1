@@ -1,4 +1,4 @@
-# Install claude-sessions-dashboard as a Windows service using NSSM or as a scheduled task
+# Install Claude Code Sessions Dashboard server as a Windows service using NSSM or as a scheduled task
 # Run as Administrator
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -19,7 +19,7 @@ if ($nssm) {
     nssm install claude-dashboard $python $appPy
     nssm set claude-dashboard AppDirectory $scriptDir
     nssm set claude-dashboard AppEnvironmentExtra "CLAUDE_DASHBOARD_CONFIG=$config"
-    nssm set claude-dashboard Description "Claude Sessions Dashboard"
+    nssm set claude-dashboard Description "Claude Code Sessions Dashboard"
     nssm set claude-dashboard Start SERVICE_AUTO_START
     nssm start claude-dashboard
     Write-Host "Done! Service installed and started."
@@ -32,7 +32,7 @@ if ($nssm) {
     $action = New-ScheduledTaskAction -Execute $python -Argument $appPy -WorkingDirectory $scriptDir
     $trigger = New-ScheduledTaskTrigger -AtLogon
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
-    Register-ScheduledTask -TaskName "ClaudeDashboard" -Action $action -Trigger $trigger -Settings $settings -Description "Claude Sessions Dashboard"
+    Register-ScheduledTask -TaskName "ClaudeDashboard" -Action $action -Trigger $trigger -Settings $settings -Description "Claude Code Sessions Dashboard"
     Start-ScheduledTask -TaskName "ClaudeDashboard"
     Write-Host "Done! Scheduled task created and started."
     Write-Host "  Get-ScheduledTask -TaskName ClaudeDashboard"

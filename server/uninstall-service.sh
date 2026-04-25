@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Uninstall claude-sessions-dashboard service
+# Uninstall the Claude Code Sessions Dashboard service
 
 case "$(uname -s)" in
     Linux)

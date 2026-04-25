@@ -1,4 +1,4 @@
-# Claude Sessions Dashboard — Server Configuration
+# Claude Code Sessions Dashboard — Server Configuration
 api_key: "change-me-to-a-secret"
 host: "0.0.0.0"
 port: 5050

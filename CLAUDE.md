@@ -1,4 +1,4 @@
-# Claude Sessions Dashboard
+# Claude Code Sessions Dashboard
 
 A client-server tool to centrally view Claude Code conversations across multiple machines.
 

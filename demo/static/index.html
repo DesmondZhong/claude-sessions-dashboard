@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Sessions Dashboard</title>
+<title>Claude Code Sessions Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <style>
   :root, [data-theme="dark"] {
@@ -254,7 +254,7 @@
 </head>
 <body>
 <div class="header">
-  <h1>Claude Sessions</h1>
+  <h1>Claude Code Sessions</h1>
   <div class="controls">
     <input class="search-input" type="text" id="search" placeholder="Search sessions...">
     <select id="vm-filter"><option value="">All VMs</option></select>
@@ -340,7 +340,7 @@ window.STATIC_DATA = {"clients": [{"ip_address": "10.0.1.5", "last_sync": "2026-
   document.addEventListener('DOMContentLoaded', () => {
     const banner = document.createElement('div');
     banner.className = 'demo-banner';
-    banner.innerHTML = "Read-only static demo \u2014 <a href=\"https://github.com/DesmondZhong/claude-sessions-dashboard\" target=\"_blank\" rel=\"noopener\">view on GitHub</a>";
+    banner.innerHTML = "Read-only static demo \u2014 <a href=\"https://github.com/DesmondZhong/claude-code-sessions-dashboard\" target=\"_blank\" rel=\"noopener\">view on GitHub</a>";
     document.body.insertBefore(banner, document.body.firstChild);
   });
 

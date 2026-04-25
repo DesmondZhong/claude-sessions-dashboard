@@ -1,4 +1,4 @@
-# Claude Sessions Sync Client — Configuration
+# Claude Code Sessions Dashboard — Sync Client Configuration
 server_url: "http://localhost:5050"
 api_key: "change-me-to-a-secret"
 # vm_name: "my-vm"  # unique label for this machine (defaults to hostname)

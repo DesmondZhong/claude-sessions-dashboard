@@ -39,7 +39,7 @@ case "$(uname -s)" in
         SERVICE_FILE="/etc/systemd/system/claude-dashboard-client.service"
         sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
-Description=Claude Sessions Dashboard Client
+Description=Claude Code Sessions Dashboard Client
 After=network.target
 
 [Service]

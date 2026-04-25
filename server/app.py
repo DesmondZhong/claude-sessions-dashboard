@@ -402,7 +402,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Sessions Dashboard</title>
+<title>Claude Code Sessions Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <style>
   :root, [data-theme="dark"] {
@@ -653,7 +653,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="header">
-  <h1>Claude Sessions</h1>
+  <h1>Claude Code Sessions</h1>
   <div class="controls">
     <input class="search-input" type="text" id="search" placeholder="Search sessions...">
     <select id="vm-filter"><option value="">All VMs</option></select>
@@ -1204,5 +1204,5 @@ if __name__ == "__main__":
     host = cfg.get("host", "0.0.0.0")
     port = cfg.get("port", 5000)
     debug = cfg.get("debug", False)
-    print(f"Starting Claude Sessions Dashboard on {host}:{port}")
+    print(f"Starting Claude Code Sessions Dashboard on {host}:{port}")
     app.run(host=host, port=port, debug=debug)
