@@ -49,22 +49,25 @@ Then open <http://localhost:5097>.
 
 ## Deploy the static demo
 
-Pick whichever host you like — they all work because the output is a plain HTML file.
+The output is a plain HTML file; any static host works.
+
+### Netlify (recommended)
+
+A `netlify.toml` at the repo root configures the build automatically. In Netlify: **Add new site** → **Import an existing project** → connect GitHub → pick this repo. Done — every push to `main` redeploys.
+
+If you'd rather configure manually:
+- **Build command**: `pip install -r server/requirements.txt && python demo/build_static.py`
+- **Publish directory**: `demo/static`
+
+### Cloudflare Pages
+
+Same settings as Netlify (build command + publish directory). Cloudflare Pages doesn't read `netlify.toml`, so set them via the dashboard.
 
 ### GitHub Pages
 
-1. Settings → Pages → Source: **Deploy from a branch**.
-2. Branch: `main`, folder: `/demo/static`. Save.
-3. After ~1 minute it's live at `https://<user>.github.io/<repo>/`.
-
-For a custom subdomain, add a `CNAME` file inside `demo/static/`.
-
-### Cloudflare Pages / Netlify
-
-- **Build command**: `python demo/build_static.py`
-- **Output directory**: `demo/static`
-
-Both will rebuild on every push to `main`.
+GitHub Pages' "Deploy from a branch" mode only accepts `/` or `/docs/` as the publish folder, not `/demo/static`. Two ways around it:
+- Move the build output to `/docs/` (small change to `build_static.py`), or
+- Use a GitHub Actions workflow with the modern Pages source (any folder).
 
 ### Anywhere else
 

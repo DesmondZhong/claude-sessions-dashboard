@@ -6,7 +6,7 @@ Centrally view and manage Claude Code conversations across every machine you wor
 
 A static demo with 12 synthetic conversations across 3 machines runs entirely in your browser. No backend, no signup, no cold start.
 
-**[→ Live demo](https://desmondzhong.github.io/claude-code-sessions-dashboard/)** &nbsp;·&nbsp; or build it yourself: `python demo/build_static.py`
+**[→ Live demo](https://claude-code-sessions-dashboard.netlify.app/)** &nbsp;·&nbsp; or build it yourself: `python demo/build_static.py`
 
 ### What you can do
 

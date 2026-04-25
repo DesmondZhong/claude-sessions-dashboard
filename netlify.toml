@@ -1,0 +1,9 @@
+# Netlify build config for the static demo.
+#
+# Setup: in Netlify, "Add new site" → "Import an existing project" → connect
+# GitHub → pick this repo. Netlify reads this file and auto-deploys the demo
+# at https://<your-site>.netlify.app on every push to main.
+
+[build]
+  command = "pip install -r server/requirements.txt && python demo/build_static.py"
+  publish = "demo/static"
