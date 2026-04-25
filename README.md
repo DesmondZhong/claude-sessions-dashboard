@@ -6,7 +6,7 @@ Centrally view and manage Claude Code conversations across every machine you wor
 
 A static demo with 12 synthetic conversations across 3 machines runs entirely in your browser. No backend, no signup, no cold start.
 
-**[→ Live demo](https://claude-code-sessions-dashboard.netlify.app/)** &nbsp;·&nbsp; or build it yourself: `python demo/build_static.py`
+**[→ Live demo](https://claude-code-dashboard-demo.desmondzhong.com/)** &nbsp;·&nbsp; or build it yourself: `python demo/build_static.py`
 
 ### What you can do
 
@@ -25,7 +25,6 @@ In your own deployment you also get:
 - **Move sessions between groups** with a dropdown (or rename / merge clients) — useful after re-imaging a machine or renaming a hostname.
 - **Incremental sync** from each client (every hour by default; manually trigger with `client.py --trigger`). Only changed sessions are pushed.
 - **Raw JSONL backups** in addition to the SQLite store, preserving the original Claude Code session format.
-- **Cloudflare Access** support for protecting the dashboard while letting your clients in via service tokens.
 
 ### Screenshots
 
@@ -37,7 +36,7 @@ In your own deployment you also get:
 | ![Session list grouped by VM](docs/screenshots/01-session-list.png) | ![Session detail with markdown + nav sidebar](docs/screenshots/02-session-detail.png) |
 | *Every machine's sessions in one place, grouped by hostname.* | *Reading a session — rendered markdown, sticky controls, one-click navigation between user prompts.* |
 | ![Full-text search with snippets](docs/screenshots/03-search.png) | ![Mode toggle: monospace vs markdown](docs/screenshots/04-mode-toggle.png) |
-| *Search surfaces matching snippets across every conversation.* | *Same content in monospace (left) and markdown (right) — pick whichever reads better.* |
+| *Search surfaces matching snippets across every conversation.* | *Same content in markdown (left) and monospace (right) — pick whichever reads better.* |
 
 ## Architecture
 
@@ -326,12 +325,3 @@ Debug mode enables:
 - **Detailed tracebacks** — full stack traces instead of generic 500 errors
 
 > **Warning:** Never run debug mode in production. The interactive debugger allows arbitrary code execution.
-
-## Dashboard Features
-
-The web dashboard includes:
-
-- **Clients panel** — expandable section at the top showing all connected clients with their name, IP address, session count, last sync time, and online/stale/offline status
-- **Session list** — all sessions across all machines, searchable and filterable by VM or project
-- **Session detail** — click any session to view the full conversation with collapsible tool calls
-- **Message navigation** — sticky sidebar listing all user messages for quick jump-to navigation within a session
